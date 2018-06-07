@@ -14,6 +14,8 @@
 #include "err.h"
 #include "radio.h"
 #include "receiver.h"
+#include "transmitter_handler.h"
+#include "buffer_handler.h"
 
 current_transmitter *my_transmitter;
 
@@ -62,27 +64,6 @@ static void *handle_control_read(void *args) {
     }
 }
 
-static void increment_pointer() {
-    // TODO: Mutex
-    if (my_transmitter->read_idx == my_transmitter->buffer_size) {
-        my_transmitter->read_idx = 0;
-    }
-
-    my_transmitter->read_idx++;
-}
-
-static uint64_t find_idx (uint64_t offset) {
-    return (offset / my_transmitter->audio_size) % my_transmitter->buffer_size;
-}
-
-static uint64_t decrease_pointer(uint64_t curr_pointer) {
-    if (curr_pointer == 0) {
-        return my_transmitter->buffer_size;
-    }
-
-    return --curr_pointer;
-}
-
 static void *handle_retransmittion_requests(void *args) {
     // TODO: Mutex
     uint64_t start_idx = find_idx(my_transmitter->last_recieved);
@@ -106,75 +87,14 @@ static void *handle_retransmittion_requests(void *args) {
     // Create
 }
 
-static void destroy_audio(uint64_t buffer_idx) {
-    free(my_transmitter->cyclic_buffer[buffer_idx]->audio);
-    free(my_transmitter->cyclic_buffer[buffer_idx]);
-}
-
-static void destroy_my_transmitter(void) {
-    for (uint64_t i = 0; i < my_transmitter->buffer_size; i ++) {
-        destroy_audio(i);
-    }
-
-    free(my_transmitter);
-}
-
-static void start_music() {
-    destroy_my_transmitter();
-    my_transmitter = (current_transmitter *)calloc(sizeof(current_transmitter), 1);
-
-    if (available_transmitters != NULL) {
+static void *audio_to_stdout(void *args) {
+    while (true) {
         // TODO: Mutex
-        my_transmitter->curr_transmitter_info = available_transmitters[0];
+        if (write(STDOUT_FILENO, my_transmitter->cyclic_buffer + my_transmitter->read_idx, my_transmitter->audio_size) != my_transmitter->audio_size)
+            syserr("write");
+
+        increment_pointer();
     }
-}
-
-// Returns true if recieved new, greater session id
-static bool add_to_cyclic_buffer(ssize_t rcv_len, char *buffer) {
-    if (rcv_len <= 2 * sizeof(uint64_t)) {
-        return false;
-    }
-
-    uint64_t session_id = be64toh(*(uint64_t *) buffer);
-    uint64_t offset = be64toh(*(uint64_t *) (buffer + sizeof(uint64_t)));
-
-    audio_package *new_audio = (audio_package *) malloc(sizeof(audio_package));
-    size_t audio_size = rcv_len - 2 * sizeof(uint64_t);
-
-    if (audio_size != my_transmitter->audio_size) {
-        return false;
-    }
-
-    char *audio = malloc(audio_size);
-
-    memcpy(audio, buffer + 2 * sizeof(uint64_t), audio_size);
-
-    new_audio->audio = audio;
-    new_audio->audio_size = audio_size;
-    new_audio->offset = offset;
-
-    if (session_id == my_transmitter->session_id) {
-
-        uint64_t write_idx = find_idx(offset);
-        destroy_audio(write_idx);
-        my_transmitter->cyclic_buffer[write_idx] = new_audio;
-        return false;
-    } else if (session_id > my_transmitter->session_id) {
-        start_music();
-        return true;
-    }
-}
-
-static void create_my_transmitter (ssize_t rcv_len, const char *buffer) {
-    if (rcv_len <= 2 * sizeof(uint64_t)) {
-        return;
-    }
-
-    my_transmitter->read_idx = 0;
-    my_transmitter->audio_size = rcv_len - 2 * sizeof(uint64_t);
-    my_transmitter->session_id = be64toh(*(uint64_t *) buffer);
-    my_transmitter->buffer_size = bsize / (rcv_len - 2 * sizeof(uint64_t));
-    my_transmitter->last_recieved = be64toh(*(uint64_t *) (buffer + sizeof(uint64_t)));
 }
 
 static void *handle_audio(void *audio_args) {
@@ -203,16 +123,6 @@ static void *handle_audio(void *audio_args) {
             sock = setup_receiver(my_transmitter->curr_transmitter_info->dotted_address,
                     my_transmitter->curr_transmitter_info->remote_port);
         }
-    }
-}
-
-static void *audio_to_stdout(void *args) {
-    while (true) {
-        // TODO: Mutex
-        if (write(STDOUT_FILENO, my_transmitter->cyclic_buffer + my_transmitter->read_idx, my_transmitter->audio_size) != my_transmitter->audio_size)
-            syserr("write");
-
-        increment_pointer();
     }
 }
 
@@ -245,23 +155,34 @@ int main(int argc, char **argv) {
     available_transmitters = NULL;
     //missing_packets =
 
-    int control_protocol_write, control_protocol_read, audio;
-    pthread_t control_protocol_write_thread, control_protocol_read_thread, audio_data_thread;
+    int control_protocol_write, control_protocol_read, retransmission, audio;
+    pthread_t control_protocol_write_thread, control_protocol_read_thread, retransmission_thread, audio_data_thread;
 
     /* pthread create */
-    control_protocol_write = pthread_create(&control_protocol_write_thread, 0, handle_control_write, &control_protocol);
+    control_protocol_write = pthread_create(&control_protocol_write_thread, 0, handle_control_write, NULL);
     if (control_protocol_write == -1) {
         syserr("control protocol: pthread_create");
     }
 
-    control_protocol_read = pthread_create(&control_protocol_read_thread, 0, handle_control_read, &control_protocol);
+    control_protocol_read = pthread_create(&control_protocol_read_thread, 0, handle_control_read, NULL);
     if (control_protocol_read == -1) {
         syserr("control protocol: pthread_create");
     }
 
-    audio_threat_data a_thread_data = {session_id};
-    audio = pthread_create(&audio_data_thread, 0, handle_audio, &a_thread_data);
+    retransmission = pthread_create(&retransmission_thread, 0, handle_retransmittion_requests, NULL);
+    if (control_protocol_read == -1) {
+        syserr("control protocol: pthread_create");
+    }
+
+    audio = pthread_create(&audio_data_thread, 0, handle_audio, NULL);
     if (audio == -1) {
         syserr("audio: pthread_create");
+    }
+
+    /* pthread join */
+    int err = pthread_join(audio_data_thread, NULL);
+    if (err != 0) {
+        fprintf(stderr, "Error in pthread_join: %d (%s)\n", err, strerror(err));
+        exit(EXIT_FAILURE);
     }
 }
