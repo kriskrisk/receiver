@@ -18,7 +18,7 @@
 #include "transmitter_handler.h"
 #include "buffer_handler.h"
 
-current_transmitter *my_transmitter;
+current_transmitter *my_transmitter = NULL;
 
 char *discover_addr = DISCOVER_ADDR;
 uint16_t data_port = DATA_PORT;
@@ -27,11 +27,16 @@ size_t bsize = BSIZE;
 uint rtime = RTIME;
 
 pthread_mutex_t my_transmitter_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t available_transmitter_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t available_transmitters_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t play_music_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t almost_full = PTHREAD_COND_INITIALIZER;
 
 // TODO: Remove not responding transmitters
-transmitter_info **available_transmitters;
+transmitter_info **available_transmitters = NULL;
 int num_of_transmitters = 0;
+
+uint64_t next_to_play;
+uint64_t byte0;
 
 static void *handle_control_write(void *args) {
     char buffer[LOOKUP_SIZE];
@@ -113,9 +118,21 @@ static void *handle_retransmission_requests(void *args) {
     }
 }
 
-static void *handle_audio(void *audio_args) {
+static void *handle_audio(void *args) {
     ssize_t rcv_len;
-    transmitter_info *chosen_transmitter = (transmitter_info *) audio_args;
+    transmitter_info *chosen_transmitter;
+
+    while (true) {
+        pthread_mutex_lock(&available_transmitters_mutex);
+        if (available_transmitters != NULL) {
+            chosen_transmitter = available_transmitters[0];
+            break;
+        }
+        pthread_mutex_unlock(&available_transmitters_mutex);
+
+        sleep(1);
+    }
+
     int sock = setup_receiver(chosen_transmitter->dotted_address, chosen_transmitter->remote_port);
     char *buffer = malloc(bsize);
     bool isNew = true;
@@ -146,17 +163,31 @@ static void *handle_audio(void *audio_args) {
     }
 }
 
+/* Wait until buffer will be almost full and write to stdout */
 static void *audio_to_stdout(void *args) {
     while (true) {
         pthread_mutex_lock(&my_transmitter_mutex);
+        if (next_to_play != my_transmitter->cyclic_buffer[my_transmitter->read_idx]->offset) {
+            start_music();
+        }
+        pthread_mutex_unlock(&my_transmitter_mutex);
 
-        if (write(STDOUT_FILENO, my_transmitter->cyclic_buffer + my_transmitter->read_idx,
+        pthread_mutex_lock(&play_music_mutex);
+        pthread_mutex_lock(&my_transmitter_mutex);
+
+        if (next_to_play != my_transmitter->cyclic_buffer[my_transmitter->read_idx]->offset) {
+
+        }
+
+        if (write(STDOUT_FILENO, my_transmitter->cyclic_buffer[my_transmitter->read_idx],
                   my_transmitter->audio_size) != my_transmitter->audio_size)
             syserr("write to stdout");
 
         increment_pointer();
+        next_to_play += my_transmitter->audio_size;
 
         pthread_mutex_unlock(&my_transmitter_mutex);
+        pthread_mutex_unlock(&play_music_mutex);
     }
 }
 
@@ -203,17 +234,18 @@ int main(int argc, char **argv) {
         syserr("control protocol: pthread_create");
     }
 
+    /*
     retransmission = pthread_create(&retransmission_thread, 0, handle_retransmission_requests, NULL);
     if (control_protocol_read == -1) {
         syserr("control protocol: pthread_create");
     }
+    */
 
     audio = pthread_create(&audio_data_thread, 0, handle_audio, NULL);
     if (audio == -1) {
         syserr("audio: pthread_create");
     }
 
-    // TODO: Chosen transmitter
     audio_write = pthread_create(&audio_write_data_thread, 0, audio_to_stdout, NULL);
     if (audio_write == -1) {
         syserr("audio: pthread_create");

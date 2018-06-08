@@ -4,6 +4,7 @@
 #include <zconf.h>
 #include <malloc.h>
 #include <memory.h>
+#include <pthread.h>
 #include "buffer_handler.h"
 #include "receiver.h"
 #include "transmitter_handler.h"
@@ -12,6 +13,9 @@ extern int num_of_transmitters;
 extern transmitter_info **available_transmitters;
 extern current_transmitter *my_transmitter;
 extern size_t bsize;
+extern pthread_mutex_t play_music_mutex;
+extern pthread_cond_t almost_full;
+extern uint64_t byte0;
 
 void increment_pointer(void) {
     // If called from audio_to_stdout than in mutex
@@ -69,13 +73,19 @@ bool add_to_cyclic_buffer(ssize_t rcv_len, char *buffer) {
     new_audio->audio_size = audio_size;
     new_audio->offset = offset;
 
+    if (byte0 + (my_transmitter->buffer_size * 3 * audio_size) / 4 <= offset) {
+        pthread_cond_signal(&almost_full);
+    }
+
     if (session_id == my_transmitter->session_id) {
+
         uint64_t write_idx = find_idx(offset);
         destroy_audio(write_idx);
         my_transmitter->cyclic_buffer[write_idx] = new_audio;
 
         return false;
     } else if (session_id > my_transmitter->session_id) {
+        pthread_cond_wait(&almost_full, &play_music_mutex);
         start_music();
 
         return true;

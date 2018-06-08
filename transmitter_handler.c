@@ -12,6 +12,8 @@ extern int num_of_transmitters;
 extern transmitter_info **available_transmitters;
 extern current_transmitter *my_transmitter;
 extern size_t bsize;
+extern uint64_t next_to_play;
+extern uint64_t byte0;
 
 /* TRANSMITTER */
 
@@ -71,11 +73,13 @@ void destroy_audio(uint64_t buffer_idx) {
 /* MY_TRANSMITTER */
 
 void destroy_my_transmitter(void) {
-    for (uint64_t i = 0; i < my_transmitter->buffer_size; i ++) {
-        destroy_audio(i);
-    }
+    if (my_transmitter != NULL) {
+        for (uint64_t i = 0; i < my_transmitter->buffer_size; i++) {
+            destroy_audio(i);
+        }
 
-    free(my_transmitter);
+        free(my_transmitter);
+    }
 }
 
 void create_my_transmitter (ssize_t rcv_len, const char *buffer) {
@@ -90,4 +94,7 @@ void create_my_transmitter (ssize_t rcv_len, const char *buffer) {
     my_transmitter->session_id = be64toh(*(uint64_t *) buffer);
     my_transmitter->buffer_size = bsize / audio_size;
     my_transmitter->last_received = be64toh(*(uint64_t *) (buffer + sizeof(uint64_t)));
+
+    next_to_play = my_transmitter->last_received;
+    byte0 = next_to_play;
 }
