@@ -1,9 +1,11 @@
 #ifndef RECEIVER_H
 #define RECEIVER_H
 
+#include "radio.h"
+
 #define SLEEP_TIME 5
 #define LOOKUP_SIZE 19
-#define MAX_NUM_RETMIX 1
+#define MAX_NUM_RETMIX 13105
 
 typedef struct audio_package {
     uint64_t offset;
@@ -22,10 +24,10 @@ typedef struct current_transmitter {
     uint64_t session_id;
     audio_package **cyclic_buffer;
     size_t buffer_size;
-    int read_idx;
-    size_t audio_size;      // Size of audio data in single datagram
+    int read_idx;           // Next index to be read
+    size_t audio_size;      // psize from transmitter
     transmitter_info *curr_transmitter_info;
-    uint64_t last_recieved;
+    uint64_t last_received;
 } current_transmitter;
 
 

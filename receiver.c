@@ -10,6 +10,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <ctype.h>
+#include <inttypes.h>
 
 #include "err.h"
 #include "radio.h"
@@ -25,13 +26,12 @@ uint16_t ctrl_port = CTRL_PORT;
 size_t bsize = BSIZE;
 uint rtime = RTIME;
 
-pthread_mutex_t missing_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t audio_data_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t my_transmitter_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t available_transmitter_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+// TODO: Remove not responding transmitters
 transmitter_info **available_transmitters;
 int num_of_transmitters = 0;
-
-uint64_t *missing_packets;
 
 static void *handle_control_write(void *args) {
     char buffer[LOOKUP_SIZE];
@@ -56,44 +56,60 @@ static void *handle_control_read(void *args) {
             syserr("read");
 
         transmitter_info *new_transmitter = create_transmitter(r_buffer);
+
+        pthread_mutex_lock(&my_transmitter_mutex);
+
         if (exists(new_transmitter)) {
             destroy_transmitter(new_transmitter);
         } else {
             add_transmitter(new_transmitter);
         }
+
+        pthread_mutex_unlock(&my_transmitter_mutex);
     }
 }
 
-static void *handle_retransmittion_requests(void *args) {
-    // TODO: Mutex
-    uint64_t start_idx = find_idx(my_transmitter->last_recieved);
-    uint64_t offset_counter = my_transmitter->last_recieved;
-    uint64_t num_of_packets = 0;
+static void *handle_retransmission_requests(void *args) {
+    pthread_mutex_lock(&my_transmitter_mutex);
 
-    for (uint64_t i = start_idx; i == start_idx; i = decrease_pointer(i)) {
-        offset_counter -= my_transmitter->audio_size;
-
-        if (my_transmitter->cyclic_buffer[i] == NULL && offset_counter >= 0) {
-            num_of_packets++;
-
-            if (num_of_packets > MAX_NUM_RETMIX) {
-                break;
-            }
-
-
-        }
-    }
-
-    // Create
-}
-
-static void *audio_to_stdout(void *args) {
     while (true) {
-        // TODO: Mutex
-        if (write(STDOUT_FILENO, my_transmitter->cyclic_buffer + my_transmitter->read_idx, my_transmitter->audio_size) != my_transmitter->audio_size)
-            syserr("write");
+        sleep(rtime);
 
-        increment_pointer();
+        uint64_t start_idx = find_idx(my_transmitter->last_received);
+        uint64_t offset_counter = my_transmitter->last_received;
+        char missing_packets[MAX_NUM_RETMIX];
+        uint64_t num_of_packets = 0;
+
+        int sum_num_read = 0;
+        int num_read = sprintf(missing_packets, "LOUDER_PLEASE 512,1024,1536,5632,3584");
+        if (num_read < 0) {
+            fprintf(stderr, "Error in sprintf: %d (%s)\n", num_read, strerror(num_read));
+            exit(EXIT_FAILURE);
+        }
+        sum_num_read += num_read;
+
+        for (uint64_t i = start_idx; i == start_idx; i = decrement_pointer(i)) {
+            offset_counter -= my_transmitter->audio_size;
+
+            if (my_transmitter->cyclic_buffer[i] == NULL && offset_counter >= 0) {
+                num_of_packets++;
+
+                if (num_of_packets > MAX_NUM_RETMIX) {
+                    break;
+                }
+
+                num_read = sprintf(missing_packets, "%" PRIu64 ",", offset_counter);
+                if (num_read < 0) {
+                    fprintf(stderr, "Error in sprintf: %d (%s)\n", num_read, strerror(num_read));
+                    exit(EXIT_FAILURE);
+                }
+                sum_num_read += num_read;
+            }
+        }
+
+        missing_packets[sum_num_read - 1] = '\n';
+
+        pthread_mutex_unlock(&my_transmitter_mutex);
     }
 }
 
@@ -109,20 +125,38 @@ static void *handle_audio(void *audio_args) {
         if (rcv_len < 0)
             syserr("read");
 
-        // TODO: Mutex
         if (isNew) {
+            pthread_mutex_lock(&my_transmitter_mutex);
             create_my_transmitter(rcv_len, buffer);
+            pthread_mutex_unlock(&my_transmitter_mutex);
         }
 
-        // TODO: Mutex
+        pthread_mutex_lock(&my_transmitter_mutex);
+
         if ((isNew = add_to_cyclic_buffer(rcv_len, buffer))) {
             if (close(sock) < 0) {
                 syserr("closing sock");
             }
 
             sock = setup_receiver(my_transmitter->curr_transmitter_info->dotted_address,
-                    my_transmitter->curr_transmitter_info->remote_port);
+                                  my_transmitter->curr_transmitter_info->remote_port);
         }
+
+        pthread_mutex_unlock(&my_transmitter_mutex);
+    }
+}
+
+static void *audio_to_stdout(void *args) {
+    while (true) {
+        pthread_mutex_lock(&my_transmitter_mutex);
+
+        if (write(STDOUT_FILENO, my_transmitter->cyclic_buffer + my_transmitter->read_idx,
+                  my_transmitter->audio_size) != my_transmitter->audio_size)
+            syserr("write to stdout");
+
+        increment_pointer();
+
+        pthread_mutex_unlock(&my_transmitter_mutex);
     }
 }
 
@@ -155,8 +189,8 @@ int main(int argc, char **argv) {
     available_transmitters = NULL;
     //missing_packets =
 
-    int control_protocol_write, control_protocol_read, retransmission, audio;
-    pthread_t control_protocol_write_thread, control_protocol_read_thread, retransmission_thread, audio_data_thread;
+    int control_protocol_write, control_protocol_read, retransmission, audio, audio_write;
+    pthread_t control_protocol_write_thread, control_protocol_read_thread, retransmission_thread, audio_data_thread, audio_write_data_thread;
 
     /* pthread create */
     control_protocol_write = pthread_create(&control_protocol_write_thread, 0, handle_control_write, NULL);
@@ -169,7 +203,7 @@ int main(int argc, char **argv) {
         syserr("control protocol: pthread_create");
     }
 
-    retransmission = pthread_create(&retransmission_thread, 0, handle_retransmittion_requests, NULL);
+    retransmission = pthread_create(&retransmission_thread, 0, handle_retransmission_requests, NULL);
     if (control_protocol_read == -1) {
         syserr("control protocol: pthread_create");
     }
@@ -179,10 +213,18 @@ int main(int argc, char **argv) {
         syserr("audio: pthread_create");
     }
 
+    // TODO: Chosen transmitter
+    audio_write = pthread_create(&audio_write_data_thread, 0, audio_to_stdout, NULL);
+    if (audio_write == -1) {
+        syserr("audio: pthread_create");
+    }
+
     /* pthread join */
     int err = pthread_join(audio_data_thread, NULL);
     if (err != 0) {
         fprintf(stderr, "Error in pthread_join: %d (%s)\n", err, strerror(err));
         exit(EXIT_FAILURE);
     }
+
+    // TODO: Check what to do with the rest
 }

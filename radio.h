@@ -2,6 +2,7 @@
 #define RADIO_H
 
 #include <stdint.h>
+#include <netinet/in.h>
 
 #define DISCOVER_ADDR "255.255.255.255"
 #define DATA_PORT 21240

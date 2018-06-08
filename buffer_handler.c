@@ -13,11 +13,8 @@ extern transmitter_info **available_transmitters;
 extern current_transmitter *my_transmitter;
 extern size_t bsize;
 
-extern pthread_mutex_t missing_mutex;
-extern pthread_mutex_t audio_data_mutex;
-
 void increment_pointer(void) {
-    // TODO: Mutex
+    // If called from audio_to_stdout than in mutex
     if (my_transmitter->read_idx == my_transmitter->buffer_size) {
         my_transmitter->read_idx = 0;
     }
@@ -29,12 +26,13 @@ uint64_t find_idx (uint64_t offset) {
     return (offset / my_transmitter->audio_size) % my_transmitter->buffer_size;
 }
 
-uint64_t decrease_pointer(uint64_t curr_pointer) {
+uint64_t decrement_pointer(uint64_t curr_pointer) {
+    // If called from handle_retransmission_requests than already has mutex
     if (curr_pointer == 0) {
         return my_transmitter->buffer_size;
     }
 
-    return --curr_pointer;
+    return curr_pointer - 1;
 }
 
 void start_music(void) {
@@ -42,12 +40,12 @@ void start_music(void) {
     my_transmitter = (current_transmitter *)calloc(sizeof(current_transmitter), 1);
 
     if (available_transmitters != NULL) {
-        // TODO: Mutex
+        // If called from handle_audio than in mutex
         my_transmitter->curr_transmitter_info = available_transmitters[0];
     }
 }
 
-// Returns true if recieved new, greater session id
+// Returns true if received new, greater session id
 bool add_to_cyclic_buffer(ssize_t rcv_len, char *buffer) {
     if (rcv_len <= 2 * sizeof(uint64_t)) {
         return false;
@@ -72,13 +70,17 @@ bool add_to_cyclic_buffer(ssize_t rcv_len, char *buffer) {
     new_audio->offset = offset;
 
     if (session_id == my_transmitter->session_id) {
-
         uint64_t write_idx = find_idx(offset);
         destroy_audio(write_idx);
         my_transmitter->cyclic_buffer[write_idx] = new_audio;
+
         return false;
     } else if (session_id > my_transmitter->session_id) {
         start_music();
+
         return true;
     }
+
+    free(new_audio);
+    return false;
 }
