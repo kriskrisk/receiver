@@ -47,7 +47,6 @@ static void *handle_control_write(void *args) {
     char buffer[LOOKUP_SIZE];
     struct sockaddr_in client_address;
     socklen_t client_address_len = sizeof(struct sockaddr_in);
-    //int sock = setup_sender(discover_addr, ctrl_port);
 
     client_address.sin_family = AF_INET;
     client_address.sin_addr.s_addr = inet_addr("255.255.255.255");
