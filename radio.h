@@ -19,6 +19,7 @@
 #define REPLY_SIZE 100
 #define TTL_VALUE 64
 
+extern int setup_control_socket(char *remote_dotted_address, in_port_t remote_port);
 extern int setup_sender(char *remote_dotted_address, in_port_t remote_port);
 extern int setup_receiver (char *multicast_dotted_address, in_port_t local_port);
 

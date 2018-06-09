@@ -39,6 +39,7 @@ uint64_t decrement_pointer(uint64_t curr_pointer) {
     return curr_pointer - 1;
 }
 
+/*
 void start_music(void) {
     destroy_my_transmitter();
     my_transmitter = (current_transmitter *)calloc(sizeof(current_transmitter), 1);
@@ -48,6 +49,7 @@ void start_music(void) {
         my_transmitter->curr_transmitter_info = available_transmitters[0];
     }
 }
+*/
 
 // Returns true if received new, greater session id
 bool add_to_cyclic_buffer(ssize_t rcv_len, char *buffer) {
@@ -73,7 +75,7 @@ bool add_to_cyclic_buffer(ssize_t rcv_len, char *buffer) {
     new_audio->audio_size = audio_size;
     new_audio->offset = offset;
 
-    if (byte0 + (my_transmitter->buffer_size * 3 * audio_size) / 4 <= offset) {
+    if (my_transmitter->byte0 + (my_transmitter->buffer_size * 3 * audio_size) / 4 <= offset) {
         pthread_cond_signal(&almost_full);
     }
 
@@ -85,8 +87,8 @@ bool add_to_cyclic_buffer(ssize_t rcv_len, char *buffer) {
 
         return false;
     } else if (session_id > my_transmitter->session_id) {
-        pthread_cond_wait(&almost_full, &play_music_mutex);
-        start_music();
+        // TODO: Handle this case
+        //pthread_cond_wait(&almost_full, &play_music_mutex);
 
         return true;
     }

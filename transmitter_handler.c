@@ -3,6 +3,7 @@
 #include <netinet/in.h>
 #include <stdlib.h>
 #include <time.h>
+#include <pthread.h>
 
 #include "transmitter_handler.h"
 #include "receiver.h"
@@ -13,12 +14,12 @@ extern transmitter_info **available_transmitters;
 extern current_transmitter *my_transmitter;
 extern size_t bsize;
 extern uint64_t next_to_play;
-extern uint64_t byte0;
+extern pthread_mutex_t my_transmitter_mutex;
+extern pthread_cond_t not_empty_transmitters;
 
 /* TRANSMITTER */
 
-void destroy_transmitter (transmitter_info *transmitter) {
-    free(transmitter->name);
+void destroy_transmitter(transmitter_info *transmitter) {
     free(transmitter->dotted_address);
     free(transmitter);
 }
@@ -43,7 +44,7 @@ transmitter_info *create_transmitter(const char *buffer) {
         sscanf(buffer, "BOREWICZ_HERE %s %d %s\n", dotted_address, &port_number, new_transmitter->name);
 
         new_transmitter->dotted_address = dotted_address;
-        new_transmitter->remote_port = (in_port_t)port_number;
+        new_transmitter->remote_port = (in_port_t) port_number;
         new_transmitter->last_answer = time(NULL);
 
         return new_transmitter;
@@ -53,7 +54,7 @@ transmitter_info *create_transmitter(const char *buffer) {
 }
 
 void add_transmitter(transmitter_info *new_transmitter) {
-    // If called from handle_control_read tahn already has mutex
+    // If called from handle_control_read than already has mutex
     num_of_transmitters++;
     available_transmitters = realloc(available_transmitters, num_of_transmitters * sizeof(transmitter_info *));
     available_transmitters[num_of_transmitters - 1] = new_transmitter;
@@ -74,6 +75,17 @@ void destroy_audio(uint64_t buffer_idx) {
 
 /* MY_TRANSMITTER */
 
+/* I assume that this thread has my_transmitter_mutex */
+/* Only called when my_transmitter = NULL */
+void choose_my_transmitter(void) {
+    if (available_transmitters == NULL) {
+        pthread_cond_wait(&not_empty_transmitters, &my_transmitter_mutex);
+    }
+
+    my_transmitter = (current_transmitter *)malloc(sizeof(my_transmitter));
+    my_transmitter->curr_transmitter_info = available_transmitters[0];
+}
+
 void destroy_my_transmitter(void) {
     if (my_transmitter != NULL) {
         for (uint64_t i = 0; i < my_transmitter->buffer_size; i++) {
@@ -84,7 +96,7 @@ void destroy_my_transmitter(void) {
     }
 }
 
-void create_my_transmitter (ssize_t rcv_len, const char *buffer) {
+void create_my_transmitter(ssize_t rcv_len, const char *buffer) {
     if (rcv_len <= 2 * sizeof(uint64_t)) {
         return;
     }
@@ -96,7 +108,7 @@ void create_my_transmitter (ssize_t rcv_len, const char *buffer) {
     my_transmitter->session_id = be64toh(*(uint64_t *) buffer);
     my_transmitter->buffer_size = bsize / audio_size;
     my_transmitter->last_received = be64toh(*(uint64_t *) (buffer + sizeof(uint64_t)));
+    my_transmitter->byte0 = my_transmitter->last_received;
 
     next_to_play = my_transmitter->last_received;
-    byte0 = next_to_play;
 }

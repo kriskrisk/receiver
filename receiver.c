@@ -27,52 +27,47 @@ size_t bsize = BSIZE;
 uint rtime = RTIME;
 
 pthread_mutex_t my_transmitter_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t first_audio_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t available_transmitters_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t play_music_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t almost_full = PTHREAD_COND_INITIALIZER;
+pthread_cond_t not_empty_transmitters = PTHREAD_COND_INITIALIZER;
+pthread_cond_t almost_full = PTHREAD_COND_INITIALIZER;  // I hope it can be accessed only when my_transmitter mutex is on
 
 // TODO: Remove not responding transmitters
 transmitter_info **available_transmitters = NULL;
 int num_of_transmitters = 0;
 
+/* Offset of package that should be played now */
 uint64_t next_to_play;
-uint64_t byte0;
+
+/* Socket for control protocol */
+int sock_control_protocol;
 
 static void *handle_control_write(void *args) {
     char buffer[LOOKUP_SIZE];
-    int sock = setup_sender(discover_addr, ctrl_port);
+    struct sockaddr_in client_address;
+    socklen_t client_address_len = sizeof(struct sockaddr_in);
+    //int sock = setup_sender(discover_addr, ctrl_port);
+
+    client_address.sin_family = AF_INET;
+    client_address.sin_addr.s_addr = inet_addr("255.255.255.255");
+    client_address.sin_port = htons(ctrl_port);
 
     while (true) {
         strncpy(buffer, "ZERO_SEVEN_COME_IN\n", LOOKUP_SIZE);
-        if (write(sock, buffer, LOOKUP_SIZE) != LOOKUP_SIZE)
-            syserr("write");
+        if (sendto(sock_control_protocol, buffer, (size_t) LOOKUP_SIZE, 0, (struct sockaddr *) &client_address,
+                   client_address_len) != LOOKUP_SIZE)
+            syserr("sendto");
+
         sleep(SLEEP_TIME);
     }
 }
 
 static void *handle_control_read(void *args) {
     ssize_t rcv_len;
-    struct sockaddr_in server_address;
     char r_buffer[REPLY_SIZE];
-    //int sock = setup_receiver(discover_addr, ctrl_port);
-
-    int sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0)
-        syserr("socket");
-
-    int enable = 1;
-    if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0)
-        syserr("SO_REUSEADDR failed");
-
-    server_address.sin_family = AF_INET;
-    server_address.sin_addr.s_addr = htonl(INADDR_ANY);
-    server_address.sin_port = htons(ctrl_port);
-
-    if (bind(sock, (struct sockaddr *) &server_address, (socklen_t) sizeof(server_address)) < 0)
-        syserr("bind");
 
     while (true) {
-        rcv_len = read(sock, r_buffer, REPLY_SIZE);
+        rcv_len = read(sock_control_protocol, r_buffer, REPLY_SIZE);
         if (rcv_len < 0)
             syserr("read");
 
@@ -86,6 +81,7 @@ static void *handle_control_read(void *args) {
                 destroy_transmitter(new_transmitter);
             } else {
                 add_transmitter(new_transmitter);
+                pthread_cond_signal(&not_empty_transmitters);
             }
 
             pthread_mutex_unlock(&my_transmitter_mutex);
@@ -139,24 +135,22 @@ static void *handle_retransmission_requests(void *args) {
 
 static void *handle_audio(void *args) {
     ssize_t rcv_len;
-    transmitter_info *chosen_transmitter;
-
-    while (true) {
-        pthread_mutex_lock(&available_transmitters_mutex);
-        if (available_transmitters != NULL) {
-            chosen_transmitter = available_transmitters[0];
-            break;
-        }
-        pthread_mutex_unlock(&available_transmitters_mutex);
-
-        sleep(1);
-    }
-
-    int sock = setup_receiver(chosen_transmitter->dotted_address, chosen_transmitter->remote_port);
+    int sock;
     char *buffer = malloc(bsize);
     bool isNew = true;
 
     while (true) {
+        pthread_mutex_lock(&my_transmitter_mutex);
+
+        if (my_transmitter == NULL) {
+            choose_my_transmitter();    // pthread_cond_wait here
+            sock = setup_receiver(my_transmitter->curr_transmitter_info->dotted_address,
+                    my_transmitter->curr_transmitter_info->remote_port);
+            isNew = true;
+        }
+
+        pthread_mutex_unlock(&my_transmitter_mutex);    // TODO: What if I loose my_transmitter?
+
         rcv_len = read(sock, buffer, bsize);
         if (rcv_len < 0)
             syserr("read");
@@ -184,18 +178,17 @@ static void *handle_audio(void *args) {
 
 /* Wait until buffer will be almost full and write to stdout */
 static void *audio_to_stdout(void *args) {
+    pthread_mutex_lock(&first_audio_mutex);
+    pthread_cond_wait(&almost_full, &first_audio_mutex);
+
     while (true) {
         pthread_mutex_lock(&my_transmitter_mutex);
-        if (next_to_play != my_transmitter->cyclic_buffer[my_transmitter->read_idx]->offset) {
-            start_music();
-        }
-        pthread_mutex_unlock(&my_transmitter_mutex);
-
-        pthread_mutex_lock(&play_music_mutex);
-        pthread_mutex_lock(&my_transmitter_mutex);
 
         if (next_to_play != my_transmitter->cyclic_buffer[my_transmitter->read_idx]->offset) {
-
+            memset(my_transmitter->cyclic_buffer, 0, my_transmitter->buffer_size);
+            my_transmitter->read_idx = 0;
+            destroy_my_transmitter();
+            pthread_cond_wait(&almost_full, &my_transmitter_mutex);
         }
 
         if (write(STDOUT_FILENO, my_transmitter->cyclic_buffer[my_transmitter->read_idx],
@@ -206,8 +199,9 @@ static void *audio_to_stdout(void *args) {
         next_to_play += my_transmitter->audio_size;
 
         pthread_mutex_unlock(&my_transmitter_mutex);
-        pthread_mutex_unlock(&play_music_mutex);
     }
+
+    pthread_mutex_unlock(&my_transmitter_mutex);
 }
 
 int main(int argc, char **argv) {
@@ -237,6 +231,7 @@ int main(int argc, char **argv) {
     }
 
     available_transmitters = NULL;
+    sock_control_protocol = setup_control_socket(discover_addr, ctrl_port);
 
     int control_protocol_write, control_protocol_read, retransmission, audio, audio_write;
     pthread_t control_protocol_write_thread, control_protocol_read_thread, retransmission_thread, audio_data_thread, audio_write_data_thread;
@@ -258,7 +253,7 @@ int main(int argc, char **argv) {
         syserr("control protocol: pthread_create");
     }
     */
-/*
+
     audio = pthread_create(&audio_data_thread, 0, handle_audio, NULL);
     if (audio == -1) {
         syserr("audio: pthread_create");
@@ -268,8 +263,8 @@ int main(int argc, char **argv) {
     if (audio_write == -1) {
         syserr("audio: pthread_create");
     }
-*/
-sleep(10000);
+
+    sleep(10000);
     /* pthread join */
     int err = pthread_join(audio_data_thread, NULL);
     if (err != 0) {

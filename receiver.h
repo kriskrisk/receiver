@@ -28,6 +28,7 @@ typedef struct current_transmitter {
     size_t audio_size;      // psize from transmitter
     transmitter_info *curr_transmitter_info;
     uint64_t last_received;
+    uint64_t byte0;
 } current_transmitter;
 
 
