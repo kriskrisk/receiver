@@ -5,6 +5,7 @@
 #include <malloc.h>
 #include <memory.h>
 #include <pthread.h>
+
 #include "buffer_handler.h"
 #include "receiver.h"
 #include "transmitter_handler.h"

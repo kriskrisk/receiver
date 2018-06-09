@@ -11,9 +11,8 @@
 
 #include "err.h"
 #include "radio.h"
-#include "err.h"
 
-int setup_control_socket (char *remote_dotted_address, in_port_t remote_port) {
+int setup_control_socket(char *remote_dotted_address, in_port_t remote_port) {
     int sock, optval;
     struct sockaddr_in remote_address;
 
@@ -24,12 +23,12 @@ int setup_control_socket (char *remote_dotted_address, in_port_t remote_port) {
 
     /* Activate broadcast */
     optval = 1;
-    if (setsockopt(sock, SOL_SOCKET, SO_BROADCAST, (void*)&optval, sizeof optval) < 0)
+    if (setsockopt(sock, SOL_SOCKET, SO_BROADCAST, (void *) &optval, sizeof optval) < 0)
         syserr("setsockopt broadcast");
 
     /* Setup TTL for datagrams sent to group */
     optval = TTL_VALUE;
-    if (setsockopt(sock, IPPROTO_IP, IP_MULTICAST_TTL, (void*)&optval, sizeof optval) < 0)
+    if (setsockopt(sock, IPPROTO_IP, IP_MULTICAST_TTL, (void *) &optval, sizeof optval) < 0)
         syserr("setsockopt multicast ttl");
 
     /* Setup address and port number of receiver */
@@ -41,37 +40,7 @@ int setup_control_socket (char *remote_dotted_address, in_port_t remote_port) {
     return sock;
 }
 
-int setup_sender (char *remote_dotted_address, in_port_t remote_port) {
-    int sock, optval;
-    struct sockaddr_in remote_address;
-
-    /* Open socket */
-    sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0)
-        syserr("socket");
-
-    /* Activate broadcast */
-    optval = 1;
-    if (setsockopt(sock, SOL_SOCKET, SO_BROADCAST, (void*)&optval, sizeof optval) < 0)
-        syserr("setsockopt broadcast");
-
-    /* Setup TTL for datagrams sent to group */
-    optval = TTL_VALUE;
-    if (setsockopt(sock, IPPROTO_IP, IP_MULTICAST_TTL, (void*)&optval, sizeof optval) < 0)
-        syserr("setsockopt multicast ttl");
-
-    /* Setup address and port number of receiver */
-    remote_address.sin_family = AF_INET;
-    remote_address.sin_port = htons(remote_port);
-    if (inet_aton(remote_dotted_address, &remote_address.sin_addr) == 0)
-        syserr("inet_aton");
-    if (connect(sock, (struct sockaddr *)&remote_address, sizeof remote_address) < 0)
-        syserr("connect");
-
-    return sock;
-}
-
-int setup_receiver (char *multicast_dotted_address, in_port_t local_port) {
+int setup_receiver(char *multicast_dotted_address, in_port_t local_port) {
     int sock;
     struct sockaddr_in local_address;
     struct ip_mreq ip_mreq;

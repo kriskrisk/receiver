@@ -59,7 +59,8 @@ transmitter_info *create_transmitter(const char *buffer) {
 
 void add_transmitter_at_the_beginning(transmitter_info *new_transmitter) {
     num_of_transmitters++;
-    available_transmitters = (transmitter_info **)realloc(available_transmitters, num_of_transmitters * sizeof(transmitter_info *));
+    available_transmitters = (transmitter_info **) realloc(available_transmitters,
+                                                           num_of_transmitters * sizeof(transmitter_info *));
 
     if (num_of_transmitters > 1) {
         transmitter_info *temp = available_transmitters[0];
@@ -73,7 +74,8 @@ void add_transmitter_at_the_beginning(transmitter_info *new_transmitter) {
 void add_transmitter(transmitter_info *new_transmitter) {
     // If called from handle_control_read than already has mutex
     num_of_transmitters++;
-    available_transmitters = (transmitter_info **)realloc(available_transmitters, num_of_transmitters * sizeof(transmitter_info *));
+    available_transmitters = (transmitter_info **) realloc(available_transmitters,
+                                                           num_of_transmitters * sizeof(transmitter_info *));
     available_transmitters[num_of_transmitters - 1] = new_transmitter;
 }
 
@@ -135,7 +137,7 @@ void create_my_transmitter(ssize_t rcv_len, const char *buffer) {
     my_transmitter->buffer_size = bsize / audio_size;
     my_transmitter->last_received = be64toh(*(uint64_t *) (buffer + sizeof(uint64_t)));
     my_transmitter->byte0 = my_transmitter->last_received;
-    my_transmitter->cyclic_buffer = (audio_package **)calloc(my_transmitter->buffer_size, sizeof(audio_package *));
+    my_transmitter->cyclic_buffer = (audio_package **) calloc(my_transmitter->buffer_size, sizeof(audio_package *));
     if (my_transmitter->cyclic_buffer == NULL)
         syserr("create_my_transmitter: cyclic buffer calloc");
 

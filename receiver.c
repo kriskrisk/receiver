@@ -154,7 +154,7 @@ static void *handle_audio(void *args) {
             }
 
             sock = setup_receiver(my_transmitter->curr_transmitter_info->dotted_address,
-                    my_transmitter->curr_transmitter_info->remote_port);
+                                  my_transmitter->curr_transmitter_info->remote_port);
 
             isNew = true;
         }
@@ -187,7 +187,8 @@ static void *audio_to_stdout(void *args) {
 
         pthread_cond_wait(&almost_full, &my_transmitter_mutex);
 
-        if (my_transmitter->cyclic_buffer[my_transmitter->read_idx] == NULL || next_to_play != my_transmitter->cyclic_buffer[my_transmitter->read_idx]->offset) {
+        if (my_transmitter->cyclic_buffer[my_transmitter->read_idx] == NULL ||
+            next_to_play != my_transmitter->cyclic_buffer[my_transmitter->read_idx]->offset) {
             memset(my_transmitter->cyclic_buffer, 0, my_transmitter->buffer_size);
             my_transmitter->read_idx = 0;
             destroy_my_transmitter();
