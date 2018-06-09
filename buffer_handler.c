@@ -8,6 +8,7 @@
 #include "buffer_handler.h"
 #include "receiver.h"
 #include "transmitter_handler.h"
+#include "err.h"
 
 extern int num_of_transmitters;
 extern transmitter_info **available_transmitters;
@@ -26,7 +27,7 @@ void increment_pointer(void) {
     my_transmitter->read_idx++;
 }
 
-uint64_t find_idx (uint64_t offset) {
+uint64_t find_idx(uint64_t offset) {
     return (offset / my_transmitter->audio_size) % my_transmitter->buffer_size;
 }
 
@@ -39,18 +40,6 @@ uint64_t decrement_pointer(uint64_t curr_pointer) {
     return curr_pointer - 1;
 }
 
-/*
-void start_music(void) {
-    destroy_my_transmitter();
-    my_transmitter = (current_transmitter *)calloc(sizeof(current_transmitter), 1);
-
-    if (available_transmitters != NULL) {
-        // If called from handle_audio than in mutex
-        my_transmitter->curr_transmitter_info = available_transmitters[0];
-    }
-}
-*/
-
 // Returns true if received new, greater session id
 bool add_to_cyclic_buffer(ssize_t rcv_len, char *buffer) {
     if (rcv_len <= 2 * sizeof(uint64_t)) {
@@ -61,6 +50,9 @@ bool add_to_cyclic_buffer(ssize_t rcv_len, char *buffer) {
     uint64_t offset = be64toh(*(uint64_t *) (buffer + sizeof(uint64_t)));
 
     audio_package *new_audio = (audio_package *) malloc(sizeof(audio_package));
+    if (new_audio == NULL)
+        syserr("add_to_cyclic_buffer: malloc");
+
     size_t audio_size = rcv_len - 2 * sizeof(uint64_t);
 
     if (audio_size != my_transmitter->audio_size) {

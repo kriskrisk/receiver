@@ -8,6 +8,7 @@
 #include "transmitter_handler.h"
 #include "receiver.h"
 #include "radio.h"
+#include "err.h"
 
 extern int num_of_transmitters;
 extern transmitter_info **available_transmitters;
@@ -38,6 +39,9 @@ bool validate_lookup_message(const char *protocol_msg) {      // protocol_msg is
 transmitter_info *create_transmitter(const char *buffer) {
     if (validate_lookup_message(buffer)) {
         transmitter_info *new_transmitter = (transmitter_info *) malloc(sizeof(transmitter_info));
+        if (new_transmitter == NULL)
+            syserr("create_transmitter: malloc");
+
         char *dotted_address = (char *) malloc(MAX_DOTTEN_ADDRESS_SIZE);
         int port_number;
 
@@ -82,7 +86,9 @@ void choose_my_transmitter(void) {
         pthread_cond_wait(&not_empty_transmitters, &my_transmitter_mutex);
     }
 
-    my_transmitter = (current_transmitter *)malloc(sizeof(my_transmitter));
+    my_transmitter = (current_transmitter *)malloc(sizeof(current_transmitter));
+    if (my_transmitter == NULL)
+        syserr("choose_my_transmitter: malloc");
     my_transmitter->curr_transmitter_info = available_transmitters[0];
 }
 
@@ -93,6 +99,7 @@ void destroy_my_transmitter(void) {
         }
 
         free(my_transmitter);
+        my_transmitter = NULL;
     }
 }
 
@@ -109,6 +116,11 @@ void create_my_transmitter(ssize_t rcv_len, const char *buffer) {
     my_transmitter->buffer_size = bsize / audio_size;
     my_transmitter->last_received = be64toh(*(uint64_t *) (buffer + sizeof(uint64_t)));
     my_transmitter->byte0 = my_transmitter->last_received;
+    my_transmitter->cyclic_buffer = (audio_package **)calloc(my_transmitter->buffer_size, sizeof(audio_package *));
+    if (my_transmitter->cyclic_buffer == NULL)
+        syserr("create_my_transmitter: cyclic buffer calloc");
+
+    // TODO: get the audio
 
     next_to_play = my_transmitter->last_received;
 }

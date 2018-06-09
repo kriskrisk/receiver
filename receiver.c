@@ -74,7 +74,6 @@ static void *handle_control_read(void *args) {
         transmitter_info *new_transmitter = create_transmitter(r_buffer);
 
         if (new_transmitter != NULL) {
-            printf("Yeah");
             pthread_mutex_lock(&my_transmitter_mutex);
 
             if (exists(new_transmitter)) {
@@ -144,24 +143,21 @@ static void *handle_audio(void *args) {
 
         if (my_transmitter == NULL) {
             choose_my_transmitter();    // pthread_cond_wait here
+            if (close(sock) < 0) {
+                syserr("closing sock");
+            }
             sock = setup_receiver(my_transmitter->curr_transmitter_info->dotted_address,
                     my_transmitter->curr_transmitter_info->remote_port);
             isNew = true;
         }
-
-        pthread_mutex_unlock(&my_transmitter_mutex);    // TODO: What if I loose my_transmitter?
 
         rcv_len = read(sock, buffer, bsize);
         if (rcv_len < 0)
             syserr("read");
 
         if (isNew) {
-            pthread_mutex_lock(&my_transmitter_mutex);
             create_my_transmitter(rcv_len, buffer);
-            pthread_mutex_unlock(&my_transmitter_mutex);
         }
-
-        pthread_mutex_lock(&my_transmitter_mutex);
 
         if ((isNew = add_to_cyclic_buffer(rcv_len, buffer))) {
             if (close(sock) < 0) {
@@ -176,7 +172,7 @@ static void *handle_audio(void *args) {
     }
 }
 
-/* Wait until buffer will be almost full and write to stdout */
+/* Wait until buffer will be almost full and write to stdout *//*
 static void *audio_to_stdout(void *args) {
     pthread_mutex_lock(&first_audio_mutex);
     pthread_cond_wait(&almost_full, &first_audio_mutex);
@@ -184,24 +180,48 @@ static void *audio_to_stdout(void *args) {
     while (true) {
         pthread_mutex_lock(&my_transmitter_mutex);
 
-        if (next_to_play != my_transmitter->cyclic_buffer[my_transmitter->read_idx]->offset) {
+        if (my_transmitter->cyclic_buffer[my_transmitter->read_idx] == NULL || next_to_play != my_transmitter->cyclic_buffer[my_transmitter->read_idx]->offset) {
             memset(my_transmitter->cyclic_buffer, 0, my_transmitter->buffer_size);
             my_transmitter->read_idx = 0;
             destroy_my_transmitter();
             pthread_cond_wait(&almost_full, &my_transmitter_mutex);
+        } else {
+            if (write(STDOUT_FILENO, my_transmitter->cyclic_buffer[my_transmitter->read_idx],
+                      my_transmitter->audio_size) != my_transmitter->audio_size)
+                syserr("write to stdout");
+
+            increment_pointer();
+            next_to_play += my_transmitter->audio_size;
+
+            pthread_mutex_unlock(&my_transmitter_mutex);
         }
-
-        if (write(STDOUT_FILENO, my_transmitter->cyclic_buffer[my_transmitter->read_idx],
-                  my_transmitter->audio_size) != my_transmitter->audio_size)
-            syserr("write to stdout");
-
-        increment_pointer();
-        next_to_play += my_transmitter->audio_size;
-
-        pthread_mutex_unlock(&my_transmitter_mutex);
     }
 
     pthread_mutex_unlock(&my_transmitter_mutex);
+}
+*/
+/* Wait until buffer will be almost full and write to stdout */
+static void *audio_to_stdout(void *args) {
+    while (true) {
+        pthread_mutex_lock(&my_transmitter_mutex);
+
+        pthread_cond_wait(&almost_full, &my_transmitter_mutex);
+
+        if (my_transmitter->cyclic_buffer[my_transmitter->read_idx] == NULL || next_to_play != my_transmitter->cyclic_buffer[my_transmitter->read_idx]->offset) {
+            memset(my_transmitter->cyclic_buffer, 0, my_transmitter->buffer_size);
+            my_transmitter->read_idx = 0;
+            destroy_my_transmitter();
+        } else {
+            if (write(STDOUT_FILENO, my_transmitter->cyclic_buffer[my_transmitter->read_idx],
+                      my_transmitter->audio_size) != my_transmitter->audio_size)
+                syserr("write to stdout");
+
+            increment_pointer();
+            next_to_play += my_transmitter->audio_size;
+        }
+
+        pthread_mutex_unlock(&my_transmitter_mutex);
+    }
 }
 
 int main(int argc, char **argv) {
@@ -230,7 +250,6 @@ int main(int argc, char **argv) {
         }
     }
 
-    available_transmitters = NULL;
     sock_control_protocol = setup_control_socket(discover_addr, ctrl_port);
 
     int control_protocol_write, control_protocol_read, retransmission, audio, audio_write;
