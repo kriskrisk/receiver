@@ -48,6 +48,8 @@ transmitter_info *create_transmitter(const char *buffer) {
 
         return new_transmitter;
     }
+
+    return NULL;
 }
 
 void add_transmitter(transmitter_info *new_transmitter) {

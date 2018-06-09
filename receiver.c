@@ -52,8 +52,24 @@ static void *handle_control_write(void *args) {
 
 static void *handle_control_read(void *args) {
     ssize_t rcv_len;
-    int sock = setup_receiver(discover_addr, ctrl_port);
+    struct sockaddr_in server_address;
     char r_buffer[REPLY_SIZE];
+    //int sock = setup_receiver(discover_addr, ctrl_port);
+
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0)
+        syserr("socket");
+
+    int enable = 1;
+    if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0)
+        syserr("SO_REUSEADDR failed");
+
+    server_address.sin_family = AF_INET;
+    server_address.sin_addr.s_addr = htonl(INADDR_ANY);
+    server_address.sin_port = htons(ctrl_port);
+
+    if (bind(sock, (struct sockaddr *) &server_address, (socklen_t) sizeof(server_address)) < 0)
+        syserr("bind");
 
     while (true) {
         rcv_len = read(sock, r_buffer, REPLY_SIZE);
@@ -62,15 +78,18 @@ static void *handle_control_read(void *args) {
 
         transmitter_info *new_transmitter = create_transmitter(r_buffer);
 
-        pthread_mutex_lock(&my_transmitter_mutex);
+        if (new_transmitter != NULL) {
+            printf("Yeah");
+            pthread_mutex_lock(&my_transmitter_mutex);
 
-        if (exists(new_transmitter)) {
-            destroy_transmitter(new_transmitter);
-        } else {
-            add_transmitter(new_transmitter);
+            if (exists(new_transmitter)) {
+                destroy_transmitter(new_transmitter);
+            } else {
+                add_transmitter(new_transmitter);
+            }
+
+            pthread_mutex_unlock(&my_transmitter_mutex);
         }
-
-        pthread_mutex_unlock(&my_transmitter_mutex);
     }
 }
 
@@ -218,7 +237,6 @@ int main(int argc, char **argv) {
     }
 
     available_transmitters = NULL;
-    //missing_packets =
 
     int control_protocol_write, control_protocol_read, retransmission, audio, audio_write;
     pthread_t control_protocol_write_thread, control_protocol_read_thread, retransmission_thread, audio_data_thread, audio_write_data_thread;
@@ -240,7 +258,7 @@ int main(int argc, char **argv) {
         syserr("control protocol: pthread_create");
     }
     */
-
+/*
     audio = pthread_create(&audio_data_thread, 0, handle_audio, NULL);
     if (audio == -1) {
         syserr("audio: pthread_create");
@@ -250,7 +268,8 @@ int main(int argc, char **argv) {
     if (audio_write == -1) {
         syserr("audio: pthread_create");
     }
-
+*/
+sleep(10000);
     /* pthread join */
     int err = pthread_join(audio_data_thread, NULL);
     if (err != 0) {

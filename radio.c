@@ -58,7 +58,7 @@ int setup_receiver (char *multicast_dotted_address, in_port_t local_port) {
     if (inet_aton(multicast_dotted_address, &ip_mreq.imr_multiaddr) == 0)
         syserr("inet_aton");
     if (setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, (void *) &ip_mreq, sizeof ip_mreq) < 0)
-        syserr("setsockopt");
+        syserr("setsockopt");//Error
 
     /* Connect to local address and port */
     local_address.sin_family = AF_INET;
