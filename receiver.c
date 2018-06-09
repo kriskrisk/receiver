@@ -37,7 +37,7 @@ transmitter_info **available_transmitters = NULL;
 int num_of_transmitters = 0;
 
 /* Offset of package that should be played now */
-uint64_t next_to_play;
+uint64_t next_to_play = 0;
 
 /* Socket for control protocol */
 int sock_control_protocol;
@@ -89,10 +89,10 @@ static void *handle_control_read(void *args) {
 }
 
 static void *handle_retransmission_requests(void *args) {
-    pthread_mutex_lock(&my_transmitter_mutex);
-
     while (true) {
         sleep(rtime);
+
+        pthread_mutex_lock(&my_transmitter_mutex);
 
         uint64_t start_idx = find_idx(my_transmitter->last_received);
         uint64_t offset_counter = my_transmitter->last_received;
@@ -172,34 +172,6 @@ static void *handle_audio(void *args) {
     }
 }
 
-/* Wait until buffer will be almost full and write to stdout *//*
-static void *audio_to_stdout(void *args) {
-    pthread_mutex_lock(&first_audio_mutex);
-    pthread_cond_wait(&almost_full, &first_audio_mutex);
-
-    while (true) {
-        pthread_mutex_lock(&my_transmitter_mutex);
-
-        if (my_transmitter->cyclic_buffer[my_transmitter->read_idx] == NULL || next_to_play != my_transmitter->cyclic_buffer[my_transmitter->read_idx]->offset) {
-            memset(my_transmitter->cyclic_buffer, 0, my_transmitter->buffer_size);
-            my_transmitter->read_idx = 0;
-            destroy_my_transmitter();
-            pthread_cond_wait(&almost_full, &my_transmitter_mutex);
-        } else {
-            if (write(STDOUT_FILENO, my_transmitter->cyclic_buffer[my_transmitter->read_idx],
-                      my_transmitter->audio_size) != my_transmitter->audio_size)
-                syserr("write to stdout");
-
-            increment_pointer();
-            next_to_play += my_transmitter->audio_size;
-
-            pthread_mutex_unlock(&my_transmitter_mutex);
-        }
-    }
-
-    pthread_mutex_unlock(&my_transmitter_mutex);
-}
-*/
 /* Wait until buffer will be almost full and write to stdout */
 static void *audio_to_stdout(void *args) {
     while (true) {
@@ -212,7 +184,7 @@ static void *audio_to_stdout(void *args) {
             my_transmitter->read_idx = 0;
             destroy_my_transmitter();
         } else {
-            if (write(STDOUT_FILENO, my_transmitter->cyclic_buffer[my_transmitter->read_idx],
+            if (write(STDOUT_FILENO, my_transmitter->cyclic_buffer[my_transmitter->read_idx]->audio,
                       my_transmitter->audio_size) != my_transmitter->audio_size)
                 syserr("write to stdout");
 
@@ -266,12 +238,10 @@ int main(int argc, char **argv) {
         syserr("control protocol: pthread_create");
     }
 
-    /*
     retransmission = pthread_create(&retransmission_thread, 0, handle_retransmission_requests, NULL);
     if (control_protocol_read == -1) {
         syserr("control protocol: pthread_create");
     }
-    */
 
     audio = pthread_create(&audio_data_thread, 0, handle_audio, NULL);
     if (audio == -1) {
