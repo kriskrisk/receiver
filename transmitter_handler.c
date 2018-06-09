@@ -57,10 +57,23 @@ transmitter_info *create_transmitter(const char *buffer) {
     return NULL;
 }
 
+void add_transmitter_at_the_beginning(transmitter_info *new_transmitter) {
+    num_of_transmitters++;
+    available_transmitters = (transmitter_info **)realloc(available_transmitters, num_of_transmitters * sizeof(transmitter_info *));
+
+    if (num_of_transmitters > 1) {
+        transmitter_info *temp = available_transmitters[0];
+        available_transmitters[0] = new_transmitter;
+        available_transmitters[num_of_transmitters - 1] = temp;
+    } else {
+        available_transmitters[num_of_transmitters - 1] = new_transmitter;
+    }
+}
+
 void add_transmitter(transmitter_info *new_transmitter) {
     // If called from handle_control_read than already has mutex
     num_of_transmitters++;
-    available_transmitters = realloc(available_transmitters, num_of_transmitters * sizeof(transmitter_info *));
+    available_transmitters = (transmitter_info **)realloc(available_transmitters, num_of_transmitters * sizeof(transmitter_info *));
     available_transmitters[num_of_transmitters - 1] = new_transmitter;
 }
 
@@ -74,22 +87,28 @@ void destroy_audio(uint64_t buffer_idx) {
     if (my_transmitter->cyclic_buffer[buffer_idx] != NULL) {
         free(my_transmitter->cyclic_buffer[buffer_idx]->audio);
         free(my_transmitter->cyclic_buffer[buffer_idx]);
+        my_transmitter->cyclic_buffer[buffer_idx] = NULL;
     }
 }
 
 /* MY_TRANSMITTER */
 
-/* I assume that this thread has my_transmitter_mutex */
 /* Only called when my_transmitter = NULL */
 void choose_my_transmitter(void) {
     if (available_transmitters == NULL) {
         pthread_cond_wait(&not_empty_transmitters, &my_transmitter_mutex);
     }
 
-    my_transmitter = (current_transmitter *)malloc(sizeof(current_transmitter));
+    my_transmitter = (current_transmitter *) malloc(sizeof(current_transmitter));
     if (my_transmitter == NULL)
         syserr("choose_my_transmitter: malloc");
-    my_transmitter->curr_transmitter_info = available_transmitters[0];
+
+    int next = 0;
+    while (time(NULL) - available_transmitters[next]->last_answer > 20) {
+        next++;
+    }
+
+    my_transmitter->curr_transmitter_info = available_transmitters[next];
 }
 
 void destroy_my_transmitter(void) {
@@ -119,8 +138,6 @@ void create_my_transmitter(ssize_t rcv_len, const char *buffer) {
     my_transmitter->cyclic_buffer = (audio_package **)calloc(my_transmitter->buffer_size, sizeof(audio_package *));
     if (my_transmitter->cyclic_buffer == NULL)
         syserr("create_my_transmitter: cyclic buffer calloc");
-
-    // TODO: get the audio
 
     next_to_play = my_transmitter->last_received;
 }

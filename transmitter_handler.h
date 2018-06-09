@@ -14,5 +14,6 @@ extern void destroy_audio(uint64_t buffer_idx);
 extern void destroy_my_transmitter(void);
 extern void create_my_transmitter (ssize_t rcv_len, const char *buffer);
 extern void choose_my_transmitter(void);
+void add_transmitter_at_the_beginning(transmitter_info *new_transmitter);
 
 #endif

@@ -21,18 +21,19 @@
 current_transmitter *my_transmitter = NULL;
 
 char *discover_addr = DISCOVER_ADDR;
-uint16_t data_port = DATA_PORT;
 uint16_t ctrl_port = CTRL_PORT;
+uint16_t data_port = DATA_PORT;
+uint16_t ui_port = UI_PORT;
 size_t bsize = BSIZE;
 uint rtime = RTIME;
+char *name = NAME;
+bool name_was_given = false;
 
 pthread_mutex_t my_transmitter_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t first_audio_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t available_transmitters_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t not_empty_transmitters = PTHREAD_COND_INITIALIZER;
-pthread_cond_t almost_full = PTHREAD_COND_INITIALIZER;  // I hope it can be accessed only when my_transmitter mutex is on
+pthread_cond_t almost_full = PTHREAD_COND_INITIALIZER;
 
-// TODO: Remove not responding transmitters
 transmitter_info **available_transmitters = NULL;
 int num_of_transmitters = 0;
 
@@ -79,7 +80,13 @@ static void *handle_control_read(void *args) {
             if (exists(new_transmitter)) {
                 destroy_transmitter(new_transmitter);
             } else {
-                add_transmitter(new_transmitter);
+                if (name_was_given && strcmp(new_transmitter->name, name) == 0) {
+                    destroy_my_transmitter();
+                    add_transmitter_at_the_beginning(new_transmitter);
+                } else {
+                    add_transmitter(new_transmitter);
+                }
+
                 pthread_cond_signal(&not_empty_transmitters);
             }
 
@@ -146,8 +153,10 @@ static void *handle_audio(void *args) {
             if (close(sock) < 0) {
                 syserr("closing sock");
             }
+
             sock = setup_receiver(my_transmitter->curr_transmitter_info->dotted_address,
                     my_transmitter->curr_transmitter_info->remote_port);
+
             isNew = true;
         }
 
@@ -199,7 +208,7 @@ static void *audio_to_stdout(void *args) {
 int main(int argc, char **argv) {
     int opt;
 
-    while ((opt = getopt(argc, argv, "d:P:C:U:b:R:")) != -1) {
+    while ((opt = getopt(argc, argv, "d:P:C:U:b:R:n:")) != -1) {
         switch (opt) {
             case 'd':
                 discover_addr = optarg;
@@ -211,13 +220,17 @@ int main(int argc, char **argv) {
                 ctrl_port = (uint16_t) atoi(optarg);
                 break;
             case 'U':
-                ctrl_port = (uint16_t) atoi(optarg);
+                ui_port = (uint16_t) atoi(optarg);
                 break;
             case 'b':
                 bsize = (size_t) atoi(optarg);
                 break;
             case 'R':
                 rtime = (uint) atoi(optarg);
+                break;
+            case 'n':
+                name = optarg;
+                name_was_given = true;
                 break;
         }
     }
@@ -253,13 +266,10 @@ int main(int argc, char **argv) {
         syserr("audio: pthread_create");
     }
 
-    sleep(10000);
     /* pthread join */
     int err = pthread_join(audio_data_thread, NULL);
     if (err != 0) {
         fprintf(stderr, "Error in pthread_join: %d (%s)\n", err, strerror(err));
         exit(EXIT_FAILURE);
     }
-
-    // TODO: Check what to do with the rest
 }
